@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Vercel
+.vercel/
+
+# Env / secrets — never commit
+.env*
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+*.log

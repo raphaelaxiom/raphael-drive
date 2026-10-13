@@ -1,0 +1,122 @@
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#07060e;color:#eef1ff;font-family:"Rajdhani",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;height:100%}
+button{font-family:inherit;cursor:pointer}
+.font-display{font-family:"Orbitron","Rajdhani",sans-serif}
+.rd-root{position:fixed;inset:0;overflow:hidden;background:#07060e}
+.rd-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.rd-vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,transparent 55%,rgba(2,2,10,.55) 100%);z-index:2}
+.rd-scan{position:absolute;inset:0;pointer-events:none;opacity:.12;z-index:2;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,229,255,.25) 2px 3px)}
+/* Loader */
+.rd-loader{position:absolute;inset:0;z-index:50;display:grid;place-items:center;background:#07060e;transition:opacity .6s ease,visibility .6s}
+.rd-loader.done{opacity:0;visibility:hidden}
+.rd-loader-inner{text-align:center}
+.rd-ring{width:170px;height:170px;transform:rotate(-90deg)}
+.rd-ring-bg{fill:none;stroke:#23233a;stroke-width:3}
+.rd-ring-fill{fill:none;stroke:url(#loaderGrad);stroke-width:3;stroke-linecap:round;transition:stroke-dashoffset .18s ease}
+.rd-pct{font-family:"Orbitron",sans-serif;font-size:52px;font-weight:900;margin:-124px 0 0;letter-spacing:-.02em}
+.rd-status{font-family:"Orbitron",sans-serif;font-size:11px;letter-spacing:.42em;text-transform:uppercase;color:#9aa3c7;margin-top:88px;min-height:1.4em}
+.rd-loader-brand{margin-top:28px;font-family:"Orbitron",sans-serif;letter-spacing:.55em;font-size:12px;color:#fff}
+.rd-loader-sub{margin-top:8px;font-size:13px;letter-spacing:.28em;text-transform:uppercase;color:#7f88ad}
+/* Top bar */
+.rd-top{position:absolute;top:0;left:0;right:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;gap:12px;background:linear-gradient(180deg,rgba(4,3,14,.82),rgba(4,3,14,0))}
+.rd-brand{display:flex;align-items:center;gap:11px}
+.rd-logo{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-family:"Orbitron",sans-serif;font-weight:900;font-size:15px;color:#fff;background:linear-gradient(135deg,#ff2e88,#7b2eff 55%,#00e5ff);box-shadow:0 0 24px rgba(255,46,136,.45)}
+.rd-brand b{font-family:"Orbitron",sans-serif;font-size:15px;letter-spacing:.22em}
+.rd-brand span{display:block;font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:#9aa3c7;margin-top:1px}
+.rd-nav{display:flex;gap:6px;flex-wrap:wrap}
+.rd-nav button,.rd-pill{border:1px solid rgba(255,255,255,.14);background:rgba(10,10,24,.55);color:#dbe0ff;padding:9px 14px;border-radius:999px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:12px;backdrop-filter:blur(10px)}
+.rd-nav button.active{background:#fff;color:#0a0918;border-color:#fff;box-shadow:0 0 22px rgba(0,229,255,.35)}
+.rd-nav button:hover,.rd-pill:hover{border-color:rgba(0,229,255,.6)}
+/* Panels */
+.rd-panel{position:absolute;z-index:15;background:rgba(8,7,20,.72);border:1px solid rgba(255,255,255,.12);border-radius:22px;backdrop-filter:blur(16px);box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.rd-menu{left:22px;bottom:22px;max-width:620px;padding:26px}
+.rd-menu h1{font-family:"Orbitron",sans-serif;font-size:clamp(34px,5vw,58px);line-height:.95;margin:6px 0 10px;letter-spacing:.01em}
+.rd-menu h1 em{font-style:normal;background:linear-gradient(90deg,#ff2e88,#ffb020 45%,#00e5ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.rd-eyebrow{font-size:12px;letter-spacing:.44em;text-transform:uppercase;color:#00e5ff;font-weight:700}
+.rd-lead{font-size:17px;line-height:1.55;color:#c9cfe8;margin:0 0 18px;max-width:520px}
+.rd-cta{display:flex;gap:10px;flex-wrap:wrap}
+.btn{border:0;border-radius:12px;padding:13px 18px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-size:13px}
+.btn-primary{background:linear-gradient(90deg,#ff2e88,#7b2eff);color:#fff;box-shadow:0 10px 30px rgba(255,46,136,.35)}
+.btn-ghost{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
+.btn-cyan{background:#00e5ff;color:#031018}
+.btn:active{transform:translateY(1px)}
+.rd-features{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
+.rd-feat{border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px 13px;background:rgba(255,255,255,.04)}
+.rd-feat b{display:block;font-size:13px;letter-spacing:.14em;text-transform:uppercase}
+.rd-feat span{display:block;color:#aab1d4;font-size:13.5px;line-height:1.45;margin-top:4px}
+.rd-statrow{display:flex;gap:18px;margin-top:16px;color:#9aa3c7;font-size:12px;letter-spacing:.18em;text-transform:uppercase}
+.rd-statrow b{color:#fff;font-size:16px;display:block;letter-spacing:0}
+/* Garage */
+.rd-garage{left:22px;top:76px;bottom:22px;width:360px;padding:20px;overflow:auto}
+.rd-garage h2,.rd-docs h2{font-family:"Orbitron",sans-serif;font-size:22px;margin:4px 0 4px;letter-spacing:.06em}
+.rd-muted{color:#aab1d4;font-size:14px;line-height:1.5;margin:0 0 14px}
+.rd-field{margin:14px 0}
+.rd-field label{display:flex;justify-content:space-between;font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#c9cfe8;font-weight:700;margin-bottom:8px}
+.rd-field label span{color:#00e5ff;letter-spacing:0;text-transform:none;font-size:13px}
+.rd-swatches{display:flex;gap:8px;flex-wrap:wrap}
+.rd-sw{width:38px;height:38px;border-radius:50%;border:2px solid rgba(255,255,255,.25);padding:0}
+.rd-sw.active{border-color:#fff;box-shadow:0 0 0 3px rgba(0,229,255,.5),0 0 18px rgba(0,229,255,.5)}
+.rd-seg{display:flex;gap:6px;flex-wrap:wrap}
+.rd-seg button{flex:1;min-width:72px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:#eef1ff;padding:10px 8px;border-radius:10px;font-weight:700;font-size:12px}
+.rd-seg button.active{background:#fff;color:#0a0918}
+.rd-toggle{display:flex;align-items:center;justify-content:space-between;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:11px 12px;background:rgba(255,255,255,.03);margin:8px 0;font-weight:700;font-size:14px}
+.rd-toggle input{width:44px;height:24px;accent-color:#00e5ff}
+input[type=range]{width:100%;accent-color:#00e5ff}
+.rd-note{font-size:12.5px;color:#8b93b8;line-height:1.5}
+/* Docs */
+.rd-docs{left:50%;top:76px;bottom:22px;transform:translateX(-50%);width:min(680px,calc(100% - 32px));padding:22px;overflow:auto}
+.rd-docs table{width:100%;border-collapse:collapse;margin:10px 0}
+.rd-docs th,.rd-docs td{text-align:left;padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.1);font-size:14px}
+.rd-docs th{letter-spacing:.14em;text-transform:uppercase;font-size:11px;color:#9aa3c7}
+.rd-docs kbd{background:#fff;color:#111;padding:2px 7px;border-radius:6px;font-weight:800;font-size:12px}
+/* Drive HUD */
+.rd-hud{position:absolute;z-index:15;pointer-events:none}
+.rd-speed{left:20px;bottom:20px}
+.rd-speed b{font-family:"Orbitron",sans-serif;font-size:56px;line-height:1;display:block}
+.rd-speed span{font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:#9aa3c7}
+.rd-speed .drift{margin-top:8px;font-weight:800;letter-spacing:.12em;color:#ffb020}
+.rd-bars{left:20px;bottom:118px;width:240px}
+.rd-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.12);overflow:hidden;border:1px solid rgba(255,255,255,.12);margin:6px 0 10px}
+.rd-bar i{display:block;height:100%;background:linear-gradient(90deg,#00e5ff,#ff2e88);transition:width .12s linear}
+.rd-bar-label{display:flex;justify-content:space-between;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#c9cfe8;font-weight:700}
+.rd-minimap{right:20px;top:76px;background:rgba(8,7,20,.72);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:10px;backdrop-filter:blur(10px)}
+.rd-minimap canvas{display:block;border-radius:8px}
+.rd-minimap p{margin:7px 0 0;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#aab1d4;text-align:center}
+.rd-drive-actions{right:20px;bottom:20px;display:flex;gap:8px;pointer-events:auto}
+.rd-drive-actions button{border:1px solid rgba(255,255,255,.16);background:rgba(8,7,20,.75);color:#fff;padding:10px 13px;border-radius:11px;font-weight:800;font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+.rd-check{left:50%;top:76px;transform:translateX(-50%);text-align:center}
+.rd-check b{font-family:"Orbitron",sans-serif;font-size:13px;letter-spacing:.3em;text-transform:uppercase;background:rgba(8,7,20,.7);border:1px solid rgba(255,255,255,.15);padding:9px 14px;border-radius:999px;display:inline-block}
+.rd-check p{margin:8px 0 0;font-size:14px;color:#fff;text-shadow:0 2px 10px #000}
+.rd-count{position:absolute;inset:0;z-index:18;display:grid;place-items:center;pointer-events:none}
+.rd-count b{font-family:"Orbitron",sans-serif;font-size:clamp(90px,18vw,190px);text-shadow:0 0 60px rgba(0,229,255,.7)}
+.rd-hint{left:20px;top:76px;font-size:12px;letter-spacing:.08em;color:#c9cfe8;background:rgba(8,7,20,.6);border:1px solid rgba(255,255,255,.12);padding:9px 12px;border-radius:11px;line-height:1.5}
+.rd-hint b{color:#fff}
+.rd-radio{right:20px;top:238px;width:190px;background:rgba(8,7,20,.72);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:12px;backdrop-filter:blur(10px)}
+.rd-radio b{font-family:"Orbitron",sans-serif;font-size:11px;letter-spacing:.24em;color:#ff2e88}
+.rd-radio p{margin:6px 0 0;font-size:15px;font-weight:700}
+.rd-radio span{color:#9aa3c7;font-size:12.5px}
+.rd-radio button{margin-top:9px;width:100%;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;padding:8px;border-radius:9px;font-weight:800;font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+/* Wipers: a sweeping blade overlay in rain */
+.rd-wipers{position:absolute;inset:0;z-index:14;pointer-events:none;overflow:hidden}
+.rd-wipers i{position:absolute;left:50%;bottom:-10%;width:6px;height:120%;background:linear-gradient(180deg,transparent,rgba(255,255,255,.35));transform-origin:bottom center;animation:rd-wipe 1.4s ease-in-out infinite alternate}
+@keyframes rd-wipe{from{transform:rotate(-32deg)}to{transform:rotate(32deg)}}
+.rd-touch{position:absolute;left:0;right:0;bottom:14px;z-index:22;display:none;justify-content:space-between;padding:0 14px;pointer-events:none}
+.rd-touch button{pointer-events:auto;width:58px;height:58px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(10,10,24,.65);color:#fff;font-size:20px;font-weight:900}
+.rd-touch .grp{display:flex;gap:8px}
+.rd-touch .wide{width:72px}
+@media(max-width:820px){
+  .rd-menu{left:12px;right:12px;bottom:12px;max-width:none;padding:18px}
+  .rd-features{display:none}
+  .rd-garage{left:12px;right:12px;top:70px;bottom:auto;max-height:46%;width:auto}
+  .rd-docs{top:70px}
+  .rd-top{padding:10px 12px}
+  .rd-brand span{display:none}
+  .rd-nav button{padding:8px 10px;font-size:11px}
+  .rd-bars{width:170px;bottom:108px}
+  .rd-speed b{font-size:40px}
+  .rd-minimap{display:none}
+  .rd-radio{display:none}
+  .rd-hint{display:none}
+  .rd-touch{display:flex}
+  .rd-drive-actions{bottom:92px;right:12px}
+}

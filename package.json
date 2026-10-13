@@ -1,0 +1,1 @@
+{"dependencies":{"cannon-es":"^0.20.0","next":"16.4.0","react":"19.3.0","react-dom":"19.3.0","three":"^0.182.0"},"devDependencies":{"@types/node":"^20","@types/react":"^19","@types/react-dom":"^19","@types/three":"^0.182.0","typescript":"^5"},"name":"raphael-drive","private":true,"scripts":{"build":"next build","dev":"next dev","start":"next start"},"version":"1.0.0"}
