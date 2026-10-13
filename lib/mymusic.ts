@@ -92,6 +92,13 @@ async function loadTrackBlob(id: string): Promise<Blob | null> {
 
 export type RepeatMode = "off" | "all" | "one";
 
+export type MusicListener = {
+  onTrackChange?: (id: string | null) => void;
+  onPlayingChange?: (playing: boolean) => void;
+  onProgress?: (current: number, duration: number) => void;
+  onError?: (message: string) => void;
+};
+
 export class MyMusicPlayer {
   private a: HTMLAudioElement | null = null;
   private b: HTMLAudioElement | null = null;
@@ -103,11 +110,30 @@ export class MyMusicPlayer {
   crossfade = 1.5;
   shuffle = false;
   repeat: RepeatMode = "off";
-  onTrackChange: ((id: string | null) => void) | null = null;
-  onPlayingChange: ((playing: boolean) => void) | null = null;
-  onProgress: ((current: number, duration: number) => void) | null = null;
-  private fadeRaf = 0;
+  // Multi-subscriber listeners: Garage, Drive, Settings popup and the main
+  // component ALL render a MyMusicPanel at different times. Single-callback
+  // fields meant the last panel to mount clobbered everyone else's updates
+  // (and an unmounting panel left callbacks pointing at a dead panel).
+  private listeners = new Set<MusicListener>();
+  /** Subscribe; returns an unsubscribe function. Safe to call repeatedly. */
+  subscribe(l: MusicListener): () => void {
+    this.listeners.add(l);
+    return () => { this.listeners.delete(l); };
+  }
+  private emitTrack(id: string | null) { for (const l of [...this.listeners]) { try { l.onTrackChange?.(id); } catch {} } }
+  private emitPlaying(p: boolean) { for (const l of [...this.listeners]) { try { l.onPlayingChange?.(p); } catch {} } }
+  private emitProgress(cur: number, dur: number) { for (const l of [...this.listeners]) { try { l.onProgress?.(cur, dur); } catch {} } }
+  private emitError(msg: string) { for (const l of [...this.listeners]) { try { l.onError?.(msg); } catch {} } }
+  // One rAF id PER element: the old single shared fadeRaf meant the two
+  // parallel ramps of a crossfade cancelled each other — the incoming track's
+  // fade-in froze near volume 0 while the old track faded out. UI said
+  // "Playing", nothing could be heard. Each ramp now owns its own frame.
+  private rafByEl = new Map<HTMLAudioElement, number>();
   private progressTimer: number | null = null;
+  // Refcounted progress timer: several panels can be mounted at once
+  // (Drive + popup). An unmounting panel must not kill the timer for the
+  // panels that are still on screen.
+  private progressUsers = 0;
   private queue: string[] = [];
   private queuePos = 0;
 
@@ -121,7 +147,15 @@ export class MyMusicPlayer {
           if (el === this.active) void this.handleEnded();
         });
         el.addEventListener("timeupdate", () => {
-          if (el === this.active && this.onProgress) this.onProgress(el.currentTime, el.duration || 0);
+          if (el === this.active) this.emitProgress(el.currentTime, el.duration || 0);
+        });
+        el.addEventListener("error", () => {
+          if (el === this.active) {
+            const msg = "This audio file could not be decoded by the browser. Try re-encoding as MP3 or WAV.";
+            this.playing = false;
+            this.emitPlaying(false);
+            this.emitError(msg);
+          }
         });
       }
       this.active = this.a;
@@ -146,16 +180,17 @@ export class MyMusicPlayer {
     return new Promise((resolve) => {
       if (durMs <= 0) { el.volume = to; resolve(); return; }
       const start = performance.now();
-      cancelAnimationFrame(this.fadeRaf);
+      const prev = this.rafByEl.get(el);
+      if (prev) cancelAnimationFrame(prev);
       const step = (now: number) => {
         const t = Math.min(1, (now - start) / durMs);
         // Equal-power-ish curve so the crossfade never dips to silence.
         const eased = t * t * (3 - 2 * t);
         el.volume = from + (to - from) * eased;
-        if (t < 1) this.fadeRaf = requestAnimationFrame(step);
-        else resolve();
+        if (t < 1) this.rafByEl.set(el, requestAnimationFrame(step));
+        else { this.rafByEl.delete(el); resolve(); }
       };
-      this.fadeRaf = requestAnimationFrame(step);
+      this.rafByEl.set(el, requestAnimationFrame(step));
     });
   }
 
@@ -170,7 +205,9 @@ export class MyMusicPlayer {
     el.load();
   }
 
-  /** Play a track by id. If another track is playing, crossfade out→in. */
+  /** Play a track by id. If another track is playing, crossfade out→in.
+   *  On a real playback failure the error is THROWN (not swallowed) and
+   *  playing stays false — the UI must never claim "Playing" with silence. */
   async playId(id: string, opts: { fadeIn?: boolean } = {}) {
     this.ensureElements();
     const wasPlaying = this.playing && this.active && !this.active.paused;
@@ -178,15 +215,24 @@ export class MyMusicPlayer {
     await this.setUrl(next, id);
     next.volume = 0;
     next.currentTime = 0;
-    await next.play().catch(() => { /* autoplay blocked until user gesture */ });
+    try {
+      await next.play();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const msg = `Could not play this file (${reason}). Try MP3/WAV, check browser autoplay permission and that Music volume is not 0.`;
+      this.playing = false;
+      this.emitPlaying(false);
+      this.emitError(msg);
+      throw new Error(msg);
+    }
     const fadeMs = (opts.fadeIn === false ? 0 : this.crossfade) * 1000;
     const old = this.active!;
     this.active = next;
     this.currentId = id;
     this.playing = true;
-    this.onTrackChange?.(id);
-    this.onPlayingChange?.(true);
-    // Crossfade: new fades in, old fades out in parallel.
+    this.emitTrack(id);
+    this.emitPlaying(true);
+    // Crossfade: new fades in, old fades out in parallel (separate rAF ids).
     await Promise.all([
       this.ramp(next, 0, this.volume, fadeMs),
       wasPlaying ? this.ramp(old, old.volume, 0, fadeMs).then(() => { old.pause(); }) : Promise.resolve(),
@@ -195,10 +241,19 @@ export class MyMusicPlayer {
 
   async play() {
     if (this.currentId && this.active) {
-      await this.active.play().catch(() => {});
+      try {
+        await this.active.play();
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        const msg = `Could not resume this file (${reason}). Try MP3/WAV and check volume.`;
+        this.playing = false;
+        this.emitPlaying(false);
+        this.emitError(msg);
+        throw new Error(msg);
+      }
       await this.ramp(this.active, this.active.volume, this.volume, this.crossfade * 1000);
       this.playing = true;
-      this.onPlayingChange?.(true);
+      this.emitPlaying(true);
       return;
     }
     if (this.queue.length > 0) await this.playId(this.queue[this.queuePos]);
@@ -209,7 +264,7 @@ export class MyMusicPlayer {
     await this.ramp(this.active, this.active.volume, 0, Math.min(800, this.crossfade * 1000));
     this.active.pause();
     this.playing = false;
-    this.onPlayingChange?.(false);
+    this.emitPlaying(false);
   }
 
   async stop() {
@@ -219,8 +274,8 @@ export class MyMusicPlayer {
     this.active.currentTime = 0;
     this.playing = false;
     this.currentId = null;
-    this.onTrackChange?.(null);
-    this.onPlayingChange?.(false);
+    this.emitTrack(null);
+    this.emitPlaying(false);
   }
 
   async next(auto = false) {
@@ -260,13 +315,16 @@ export class MyMusicPlayer {
   }
 
   startProgress() {
+    this.progressUsers += 1;
     if (this.progressTimer !== null) return;
     this.progressTimer = window.setInterval(() => {
-      if (this.active && this.onProgress) this.onProgress(this.active.currentTime, this.active.duration || 0);
+      if (this.active) this.emitProgress(this.active.currentTime, this.active.duration || 0);
     }, 500) as unknown as number;
   }
 
   stopProgress() {
+    this.progressUsers = Math.max(0, this.progressUsers - 1);
+    if (this.progressUsers > 0) return; // other panels still need the timer
     if (this.progressTimer !== null) { window.clearInterval(this.progressTimer); this.progressTimer = null; }
   }
 }

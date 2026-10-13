@@ -24,15 +24,29 @@ export default function MyMusicPanel({ settings, onSourceChange, onDuckToggle, o
   const [progress, setProgress] = useState({ cur: 0, dur: 0 });
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState<RepeatMode>("off");
+  const [lastError, setLastError] = useState("");
+  const [testToneState, setTestToneState] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    listMusicTracks().then(setTracks).catch(() => {});
-    myMusicPlayer.onTrackChange = (id) => setCurrentId(id);
-    myMusicPlayer.onPlayingChange = (p) => setPlaying(p);
-    myMusicPlayer.onProgress = (cur, dur) => setProgress({ cur, dur });
+    // Restore queue on mount: Garage -> Drive remounts the panel, and the
+    // queue is in-memory — without this, Play after navigation did nothing.
+    let alive = true;
+    listMusicTracks().then((list) => {
+      if (!alive) return;
+      setTracks(list);
+      myMusicPlayer.setQueue(list.map((t) => t.id));
+      setCurrentId(myMusicPlayer.currentId);
+      setPlaying(myMusicPlayer.playing);
+    }).catch(() => {});
+    const unsub = myMusicPlayer.subscribe({
+      onTrackChange: (id) => { if (alive) { setCurrentId(id); if (id) setLastError(""); } },
+      onPlayingChange: (p) => { if (alive) setPlaying(p); },
+      onProgress: (cur, dur) => { if (alive) setProgress({ cur, dur }); },
+      onError: (msg) => { if (alive) setLastError(msg); },
+    });
     myMusicPlayer.startProgress();
-    return () => { myMusicPlayer.stopProgress(); };
+    return () => { alive = false; unsub(); myMusicPlayer.stopProgress(); };
   }, []);
 
   useEffect(() => { myMusicPlayer.setVolume(settings.musicVolume / 100); }, [settings.musicVolume]);
@@ -48,22 +62,81 @@ export default function MyMusicPanel({ settings, onSourceChange, onDuckToggle, o
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const added = await addMusicFiles(files);
+    let added: MusicTrack[] = [];
+    try {
+      added = await addMusicFiles(files);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Could not save those files.";
+      setLastError(msg);
+      onToast(msg);
+      return;
+    }
     if (added.length === 0) { onToast("No playable audio files in that selection."); return; }
     await refresh();
     onToast(`Added ${added.length} song(s). They stay in this browser only — never uploaded.`);
+    // Switch source FIRST so Raphael FM fully stops before My Music starts.
     onSourceChange("mymusic");
     const list = await listMusicTracks();
-    if (list.length > 0 && !currentId) {
+    if (list.length > 0 && !myMusicPlayer.currentId) {
       myMusicPlayer.setQueue(list.map((t) => t.id));
-      await myMusicPlayer.playId(list[0].id);
+      try {
+        await myMusicPlayer.playId(list[0].id);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Could not play that file.";
+        setLastError(msg);
+        onToast(msg);
+      }
     }
   };
 
   const playTrack = async (id: string) => {
-    myMusicPlayer.setQueue(tracks.map((t) => t.id));
-    await myMusicPlayer.playId(id);
+    // Switch source FIRST (stops radio), then play — the old order played
+    // first and let the source switch re-trigger play() on a stale queue.
     onSourceChange("mymusic");
+    myMusicPlayer.setQueue(tracks.map((t) => t.id));
+    try {
+      await myMusicPlayer.playId(id);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Could not play that file.";
+      setLastError(msg);
+      onToast(msg);
+    }
+  };
+
+  const togglePlay = async () => {
+    try {
+      if (playing) await myMusicPlayer.pause();
+      else {
+        onSourceChange("mymusic");
+        await myMusicPlayer.play();
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Could not play.";
+      setLastError(msg);
+      onToast(msg);
+    }
+  };
+
+  // Test Tone: proves the browser-audio path works independent of any file.
+  // If you hear the beep but not your song, the file itself is the problem.
+  const playTestTone = () => {
+    try {
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AC();
+      void ctx.resume();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.55);
+      setTestToneState("Test tone played — if you heard the beep, your speakers + browser audio work.");
+      window.setTimeout(() => void ctx.close(), 700);
+    } catch {
+      setTestToneState("Test tone could not play — check browser audio permission.");
+    }
   };
 
   const current = tracks.find((t) => t.id === currentId);
@@ -82,19 +155,26 @@ export default function MyMusicPanel({ settings, onSourceChange, onDuckToggle, o
       <input ref={fileRef} type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac,.webm" multiple style={{ display: "none" }} onChange={(e) => { void handleFiles(e.target.files); e.target.value = ""; }} />
       <button className="btn btn-cyan" style={{ width: "100%" }} onClick={() => fileRef.current?.click()}>📁 Add My Songs From Device</button>
       <div style={{ marginTop: 10 }}>
-        <b style={{ fontSize: 13 }}>{current ? current.name : "No song playing"}</b>
+        <b style={{ fontSize: 13 }}>Now Playing: {current ? current.name : "—"}</b>
+        <p className="rd-note" style={{ margin: "2px 0 0" }}>
+          {playing ? `▶ Playing — ${fmt(progress.cur)} / ${fmt(progress.dur)}` : current ? `⏸ Paused — ${fmt(progress.cur)} / ${fmt(progress.dur)}` : "No song playing — add a song, then press Play."}
+        </p>
+        {lastError && <p style={{ fontSize: 12.5, color: "#ff6b6b", lineHeight: 1.5, margin: "6px 0 0" }}>⚠ {lastError}</p>}
+        {settings.musicVolume === 0 && <p style={{ fontSize: 12.5, color: "#ffd166", lineHeight: 1.5, margin: "6px 0 0" }}>⚠ Music Volume is 0 in Settings — turn it up to hear your songs.</p>}
+        {testToneState && <p style={{ fontSize: 12.5, color: "#9fe8ff", lineHeight: 1.5, margin: "6px 0 0" }}>{testToneState}</p>}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
           <span style={{ fontSize: 11 }}>{fmt(progress.cur)}</span>
           <input type="range" min={0} max={Math.max(1, progress.dur)} value={Math.min(progress.cur, progress.dur || 0)} onChange={(e) => myMusicPlayer.seek(Number(e.target.value))} style={{ flex: 1 }} />
           <span style={{ fontSize: 11 }}>{fmt(progress.dur)}</span>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-          <button className="btn btn-ghost" onClick={() => void myMusicPlayer.prev()}>⏮ Prev</button>
-          <button className="btn btn-primary" onClick={() => void (playing ? myMusicPlayer.pause() : myMusicPlayer.play())}>{playing ? "⏸ Pause" : "▶ Play"}</button>
-          <button className="btn btn-ghost" onClick={() => void myMusicPlayer.next()}>Next ⏭</button>
+          <button className="btn btn-ghost" onClick={() => void myMusicPlayer.prev().catch((e) => { const m = e instanceof Error ? e.message : "Could not play previous track."; setLastError(m); onToast(m); })}>⏮ Prev</button>
+          <button className="btn btn-primary" onClick={() => void togglePlay()}>{playing ? "⏸ Pause" : "▶ Play"}</button>
+          <button className="btn btn-ghost" onClick={() => void myMusicPlayer.next().catch((e) => { const m = e instanceof Error ? e.message : "Could not play next track."; setLastError(m); onToast(m); })}>Next ⏭</button>
           <button className={`btn ${shuffle ? "btn-primary" : "btn-ghost"}`} onClick={() => setShuffle((v) => !v)}>Shuffle {shuffle ? "On" : "Off"}</button>
           <button className="btn btn-ghost" onClick={() => setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"))}>Repeat: {repeat}</button>
           <button className="btn btn-ghost" onClick={() => void myMusicPlayer.stop()}>Stop</button>
+          <button className="btn btn-ghost" onClick={playTestTone}>🔔 Test Tone</button>
         </div>
         <p className="rd-note" style={{ marginTop: 6 }}>Crossfade: {settings.crossfadeDuration}s — set it in Settings. {settings.musicDuck ? "Engine ducks while music plays." : "Engine does not duck."}</p>
         <label className="rd-toggle" style={{ marginTop: 4 }}>Music ducks engine <input type="checkbox" checked={settings.musicDuck} onChange={() => onDuckToggle()} /></label>

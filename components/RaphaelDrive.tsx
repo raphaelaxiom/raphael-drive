@@ -412,9 +412,11 @@ export default function RaphaelDrive() {
     updateSettings({ musicSource: src });
     const a = audioRef.current;
     if (!a) return;
-    if (src === "radio") { a.radioOn = true; a.startRadio(); void myMusicPlayer.pause(); }
-    else if (src === "mymusic") { a.radioOn = false; void myMusicPlayer.play(); }
-    else { a.radioOn = false; void myMusicPlayer.pause(); }
+    // Switching sources must fully stop the other source: radioOn=false
+    // alone left the sequencer timer running; stopRadio() clears it.
+    if (src === "radio") { a.radioOn = true; a.startRadio(); void myMusicPlayer.pause().catch(() => {}); }
+    else if (src === "mymusic") { a.stopRadio(); void myMusicPlayer.play().catch(() => {}); }
+    else { a.stopRadio(); void myMusicPlayer.pause().catch(() => {}); }
   }, [updateSettings]);
 
   const honk = useCallback(() => {
@@ -443,11 +445,90 @@ export default function RaphaelDrive() {
     ghostPathRef.current = []; bestPathRef.current = [];
     st.countdown = set.countdownLength; st.countdownT = 0; st.started = false;
     if (set.musicSource === "radio") { audioRef.current?.startRadio(); if (audioRef.current) audioRef.current.radioOn = true; }
-    else if (set.musicSource === "mymusic") { if (audioRef.current) audioRef.current.radioOn = false; void myMusicPlayer.play(); }
+    else if (set.musicSource === "mymusic") { if (audioRef.current) audioRef.current.stopRadio(); void myMusicPlayer.play().catch(() => {}); }
     resetRef.current();
     setMode("drive");
     setCamMode(settingsRef.current.cameraMode as CamMode);
   }, []);
+
+  // ---------- In-drive Settings popup + Pause menu ----------
+  // The Settings page ("settings" mode) is a separate full-page view. In Drive
+  // there was no way to open Settings without leaving Drive (the header
+  // Settings button switched mode). These overlays fix that: the gear button
+  // opens the SAME SettingsPanel + MyMusicPanel on top of Drive/Garage,
+  // without resetting the car or score, and the pause menu pauses physics.
+  const [showSettingsPopup, setShowSettingsPopup] = useState(false);
+  const [showPauseMenu, setShowPauseMenu] = useState(false);
+  const [popupOrigin, setPopupOrigin] = useState<"hud" | "pause" | "garage" | "header">("hud");
+  const popupOpenRef = useRef(false);
+  const pauseOpenRef = useRef(false);
+  const popupOriginRef = useRef<"hud" | "pause" | "garage" | "header">("hud");
+  const setPopupOpen = (v: boolean) => { popupOpenRef.current = v; setShowSettingsPopup(v); };
+  const setPauseOpen = (v: boolean) => { pauseOpenRef.current = v; setShowPauseMenu(v); };
+  const openSettingsPopup = useCallback((origin: "hud" | "pause" | "garage" | "header") => {
+    popupOriginRef.current = origin; setPopupOrigin(origin);
+    setPopupOpen(true);
+    // Pause physics while the popup is open in Drive (resume on close).
+    if (modeRef.current === "drive") updateSettings({ paused: true });
+    if (origin === "pause") setPauseOpen(false); // popup sits above pause menu
+  }, [updateSettings]);
+  const closeSettingsPopup = useCallback(() => {
+    setPopupOpen(false);
+    if (modeRef.current === "drive") {
+      // Back to the pause menu if still paused, else resume driving.
+      if (settingsRef.current.paused) setPauseOpen(true);
+      else setPauseOpen(false);
+    } else {
+      setPauseOpen(false);
+    }
+  }, []);
+  const openPauseMenu = useCallback(() => {
+    setPauseOpen(true);
+    if (modeRef.current === "drive") updateSettings({ paused: true });
+  }, [updateSettings]);
+  const resumeFromPause = useCallback(() => {
+    setPauseOpen(false);
+    setPopupOpen(false);
+    if (modeRef.current === "drive") updateSettings({ paused: false });
+  }, [updateSettings]);
+  const exitToMenu = useCallback(() => {
+    setPauseOpen(false);
+    setPopupOpen(false);
+    updateSettings({ paused: false });
+    setMode("menu");
+  }, [updateSettings]);
+  const restartFromPause = useCallback(() => {
+    setPauseOpen(false);
+    setPopupOpen(false);
+    startDrive();
+    updateSettings({ paused: false });
+  }, [startDrive, updateSettings]);
+
+  // P / Esc handling for Drive + Garage popup + Pause menu.
+  // Esc chain in Drive: popup (Esc) -> pause menu (Esc) -> menu.
+  // P toggles pause: popup (P) -> pause menu, pause (P) -> resume.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const m = modeRef.current;
+      if (e.code !== "KeyP" && e.code !== "Escape") return;
+      if (m === "drive") {
+        if (e.code === "Escape") {
+          if (popupOpenRef.current) { closeSettingsPopup(); return; }
+          if (pauseOpenRef.current) { exitToMenu(); return; }
+          openPauseMenu(); return;
+        }
+        // KeyP
+        if (popupOpenRef.current) { closeSettingsPopup(); return; }
+        if (pauseOpenRef.current) { resumeFromPause(); return; }
+        openPauseMenu(); return;
+      }
+      if (m === "garage" && e.code === "Escape" && popupOpenRef.current) { closeSettingsPopup(); return; }
+      if ((m === "settings" || m === "docs") && e.code === "Escape") { setMode("menu"); return; }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [closeSettingsPopup, exitToMenu, openPauseMenu, resumeFromPause]);
 
   // ---------- THREE + CANNON SETUP ----------
   useEffect(() => {
@@ -906,8 +987,9 @@ export default function RaphaelDrive() {
       if (e.code === "KeyR" && modeRef.current === "drive") resetDrive();
       if (e.code === "KeyM") setMuted((m) => !m);
       if (e.code === "KeyH" && modeRef.current === "drive") { audioRef.current?.ensure(); audioRef.current?.horn(set.hornStyle); }
-      if (e.code === "KeyP" && modeRef.current === "drive") updateSettings({ paused: !settingsRef.current.paused });
-      if (e.code === "Escape") setMode((m) => (m === "drive" ? "menu" : m));
+      // NOTE: KeyP / Escape are handled by the dedicated P/Esc effect above
+      // (pause menu + settings popup). Do NOT handle them here or the popup
+      // would close and the mode would exit to menu on the same press.
     };
     const up = (e: KeyboardEvent) => { keysRef.current[e.code] = false; };
     window.addEventListener("keydown", down);
@@ -941,7 +1023,7 @@ export default function RaphaelDrive() {
         }
       }
 
-      if (modeNow === "drive" && st.countdown >= 0) {
+      if (modeNow === "drive" && st.countdown >= 0 && !settingsRef.current.paused) {
         st.countdownT += dt;
         if (st.countdownT > 0.9) { st.countdownT = 0; st.countdown -= 1; if (st.countdown < 0) st.started = true; }
       }
@@ -1528,8 +1610,13 @@ export default function RaphaelDrive() {
   }, [settings.photoMode]);
   useEffect(() => {
     // My Music ducking: engine dips while your songs play.
-    myMusicPlayer.onPlayingChange = (p) => { setMusicPlaying(p); audioRef.current?.setDuck(settingsRef.current.musicDuck, p); };
-    myMusicPlayer.onTrackChange = (id) => setCurrentSong(id);
+    // Subscribe (not assign): MyMusicPanel instances subscribe too, and a
+    // single-assignment callback would be clobbered by the last panel mounted.
+    const unsub = myMusicPlayer.subscribe({
+      onPlayingChange: (p) => { setMusicPlaying(p); audioRef.current?.setDuck(settingsRef.current.musicDuck, p); },
+      onTrackChange: (id) => setCurrentSong(id),
+    });
+    return unsub;
   }, []);
   useEffect(() => {
     // Best lap restore.
@@ -1576,6 +1663,8 @@ export default function RaphaelDrive() {
     if (m === "drive") { startDrive(); return; }
     setMode(m);
   };
+  // Drive HUD gear: visible in Drive unless photo mode / HUD off / an overlay is open.
+  const gearVisible = mode === "drive" && !settings.photoMode && settings.hudLayout !== "off" && !showSettingsPopup && !showPauseMenu;
   const toggleMute = () => { audioRef.current?.ensure(); setMuted((v) => !v); };
   const press = (key: keyof typeof touchRef.current, on: boolean) => { touchRef.current[key] = on; };
   const currentTrack = RADIO_TRACKS[trackIdx % RADIO_TRACKS.length];
@@ -1606,7 +1695,7 @@ export default function RaphaelDrive() {
           <button className={mode === "garage" ? "active" : ""} onClick={() => nav("garage")}>Garage</button>
           <button className={mode === "drive" ? "active" : ""} onClick={() => nav("drive")}>Drive</button>
           <button className={mode === "docs" ? "active" : ""} onClick={() => nav("docs")}>Docs</button>
-          <button className={mode === "settings" ? "active" : ""} onClick={() => nav("settings")}>{label(settings.language, "settings")}</button>
+          <button className={mode === "settings" ? "active" : ""} onClick={() => { if (mode === "drive" || mode === "garage") openSettingsPopup("header"); else nav("settings"); }}>{label(settings.language, "settings")}</button>
           <button onClick={toggleMute}>{muted ? "🔇 Sound Off" : "🔊 Sound On"}</button>
         </nav>
       </header>
@@ -1632,8 +1721,13 @@ export default function RaphaelDrive() {
       )}
       {mode === "garage" && (
         <aside className="rd-panel rd-garage">
-          <div className="rd-eyebrow">Garage</div>
-          <h2>Build your Vanta GT</h2>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+            <div>
+              <div className="rd-eyebrow">Garage</div>
+              <h2>Build your Vanta GT</h2>
+            </div>
+            <button className="btn btn-ghost" style={{ padding: "9px 12px", flexShrink: 0 }} onClick={() => openSettingsPopup("garage")} title="Open Settings (popup)">⚙ Settings</button>
+          </div>
           <p className="rd-muted">Every change applies live to the 3D car behind this panel. Your setup is saved on this device.</p>
           <div className="rd-field"><label>Body Style</label><div className="rd-seg">
             <button className={config.body === "vanta" ? "active" : ""} onClick={() => setConfig({ ...config, body: "vanta" })}>Vanta GT</button>
@@ -1679,7 +1773,7 @@ export default function RaphaelDrive() {
           <button className="btn btn-primary" style={{ width: "100%", marginTop: 8 }} onClick={startDrive}>▶ Drive This Setup</button>
           <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
             <button className="btn btn-ghost" style={{ flex: 1 }} onClick={honk}>📯 Horn ({settings.hornStyle})</button>
-            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => nav("settings")}>⚙ All Settings</button>
+            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => openSettingsPopup("garage")}>⚙ All Settings</button>
           </div>
           <MyMusicPanel settings={settings} onSourceChange={handleMusicSource} onDuckToggle={() => updateSettings({ musicDuck: !settings.musicDuck })} onToast={showToast} />
           <p className="rd-note" style={{ marginTop: 10 }}>Drag to orbit in garage view. Car + city are original procedural PBR — see Docs → Credits.</p>
@@ -1709,7 +1803,9 @@ export default function RaphaelDrive() {
             <tr><td>Camera</td><td><kbd>C</kbd></td><td>Camera button</td></tr>
             <tr><td>Respawn</td><td><kbd>R</kbd></td><td>Respawn button</td></tr>
             <tr><td>Mute</td><td><kbd>M</kbd></td><td>Sound toggle</td></tr>
-            <tr><td>Menu</td><td><kbd>Esc</kbd></td><td>Home button</td></tr>
+            <tr><td>Pause Menu</td><td><kbd>Esc</kbd> / <kbd>P</kbd></td><td>Pause button</td></tr>
+            <tr><td>Settings Popup (in Drive)</td><td>⚙ gear button (top-right)</td><td>⚙ button</td></tr>
+            <tr><td>Exit to Menu</td><td><kbd>Esc</kbd> in Pause Menu</td><td>Exit button in Pause</td></tr>
           </tbody></table>
           <h3 className="font-display" style={{ fontSize: 14, letterSpacing: ".2em" }}>PHYSICS</h3>
           <p className="rd-muted">• Chassis 1,400 kg, RaycastVehicle, 4 wheels, suspension stiffness 32, rest length 0.32, travel 0.32.<br />• Grip: friction slip 4.8 dry, 1.1 rear while drifting. Nitro raises engine force 3,400 → 5,200.<br />• Collisions: buildings = static boxes, traffic = 1,300 kg dynamic boxes, cones = 2 kg. Impact → camera shake + thud + damage %.<br />• Off-road: leaving the street adds drag and slows you. Sidewalks are raised 0.12.</p>
@@ -1751,9 +1847,9 @@ export default function RaphaelDrive() {
             <>
               <div className="rd-hud rd-hint"><b>{settings.keyGas.replace("Key", "")} / Arrows</b> drive · <b>Space</b> drift · <b>Shift</b> nitro · <b>H</b> horn · <b>C</b> camera · <b>R</b> respawn · <b>P</b> pause · <b>M</b> mute · <b>Esc</b> menu</div>
               {settings.checkpointProgress && <div className="rd-hud rd-check"><b>{label(settings.language, "checkpoint")} {hud.checkpoint + 1} · {label(settings.language, "lap")} {hud.laps + 1}</b><p>Follow the glowing ring — gold ring is next{stateRef.current.offroad ? " · OFF-ROAD — slow" : ""}</p></div>}
-              {settings.minimapOn && <div className="rd-hud rd-minimap"><canvas ref={minimapRef} width={settings.minimapSize} height={settings.minimapSize} style={{ width: settings.minimapSize, height: settings.minimapSize }} /><p>City Map</p></div>}
+              {settings.minimapOn && <div className="rd-hud rd-minimap" style={gearVisible ? { top: 128 } : undefined}><canvas ref={minimapRef} width={settings.minimapSize} height={settings.minimapSize} style={{ width: settings.minimapSize, height: settings.minimapSize }} /><p>City Map</p></div>}
               {settings.hudLayout === "full" && (
-                <div className="rd-hud rd-radio">
+                <div className="rd-hud rd-radio" style={gearVisible ? { top: 330 } : undefined}>
                   <b>{settings.musicSource === "mymusic" ? "MY MUSIC" : "RAPHAEL FM 88.7"}</b>
                   <p>{settings.musicSource === "mymusic" ? (currentSong ? "Your song playing" : "Add songs in My Music") : currentTrack.title}</p>
                   {settings.musicSource === "radio" && <span>{currentTrack.artist} · {currentTrack.bpm} BPM</span>}
@@ -1812,6 +1908,44 @@ export default function RaphaelDrive() {
             </div>
           )}
         </>
+      )}
+      {/* Drive HUD Settings gear — opens the popup overlay, never leaves Drive. */}
+      {gearVisible && (
+        <button className="rd-drive-settings" onClick={() => openSettingsPopup("hud")} title="Settings (popup)" aria-label="Open Settings">⚙</button>
+      )}
+      {/* Pause menu (P / Esc in Drive). Pauses physics via settings.paused. */}
+      {mode === "drive" && showPauseMenu && !showSettingsPopup && (
+        <div className="rd-modal-backdrop" onClick={resumeFromPause}>
+          <div className="rd-modal rd-pause" role="dialog" aria-modal="true" aria-label="Paused" onClick={(e) => e.stopPropagation()}>
+            <div className="rd-modal-head"><b>⏸ PAUSED</b><button className="rd-modal-x" onClick={resumeFromPause} aria-label="Resume">✕</button></div>
+            <div className="rd-modal-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button className="btn btn-primary" onClick={resumeFromPause}>▶ Resume</button>
+              <button className="btn btn-cyan" onClick={() => openSettingsPopup("pause")}>⚙ Settings</button>
+              <button className="btn btn-ghost" onClick={restartFromPause}>↻ Restart Run</button>
+              <button className="btn btn-ghost" onClick={exitToMenu}>⌂ Exit to Menu</button>
+              <p className="rd-note" style={{ margin: "6px 0 0" }}>P resumes · Esc exits to menu · Settings opens the popup on top of Drive.</p>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Settings popup overlay — same full SettingsPanel + MyMusicPanel, on top of Drive/Garage. */}
+      {showSettingsPopup && (mode === "drive" || mode === "garage") && (
+        <div className="rd-modal-backdrop" onClick={closeSettingsPopup}>
+          <div className="rd-modal" role="dialog" aria-modal="true" aria-label="Settings" onClick={(e) => e.stopPropagation()}>
+            <div className="rd-modal-head">
+              <b>⚙ Settings — {mode === "drive" ? "Drive (popup — game paused)" : "Garage (popup)"}</b>
+              <button className="rd-modal-x" onClick={closeSettingsPopup} aria-label="Close Settings">✕</button>
+            </div>
+            <div className="rd-modal-body">
+              <p className="rd-note" style={{ marginTop: 0 }}>Every change applies live without leaving {mode === "drive" ? "Drive" : "Garage"}. Esc closes this popup{mode === "drive" ? " → pause menu" : ""}.</p>
+              <SettingsPanel settings={settings} onChange={updateSettings} onAction={handleSettingsAction} onImportFile={(f) => void handleImportSettings(f)} />
+              <MyMusicPanel settings={settings} onSourceChange={handleMusicSource} onDuckToggle={() => updateSettings({ musicDuck: !settings.musicDuck })} onToast={showToast} />
+            </div>
+            <div className="rd-modal-foot">
+              <button className="btn btn-primary" onClick={closeSettingsPopup}>{mode === "drive" ? "◀ Back to Pause" : "Done"}</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

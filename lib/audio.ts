@@ -231,6 +231,14 @@ export class AudioEngine {
     o.stop(t + 0.26);
   }
 
+  stopRadio() {
+    // Fully stop the Raphael FM sequencer (not just silence it): clear the
+    // tick timer so a later startRadio() restarts cleanly, and silence any
+    // in-flight step. Used when switching to My Music / Off.
+    this.radioOn = false;
+    if (this.radioTimer !== null) { window.clearTimeout(this.radioTimer); this.radioTimer = null; }
+  }
+
   startRadio() {
     if (this.radioTimer !== null) return;
     this.step = 0;
